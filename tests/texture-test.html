@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+  <title>Tesserace Texture Test</title>
+
+  <style type="text/css">
+    canvas {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      margin-top: calc(-512px * 0.5);
+      margin-left: calc(-512px * 0.5);
+    }
+
+    img {
+      position: absolute;
+      visibility: hidden;
+      overflow: hidden;
+    }
+  </style>
+
+  <script src="../lib/lodash-2.4.1.min.js"></script>
+  <script type="text/javascript">
+    var oldArray64 = window.Float64Array;
+    window.Float64Array = window.Float32Array;
+  </script>
+  <script src="../lib/dot.min.js"></script>
+  <script type="text/javascript">
+    window.Float64Array = oldArray64;
+  </script>
+</head>
+<body>
+  <img src="../images/vindelalven/posz.jpg" alt="posz" id="posz"/>
+
+  <canvas id="canvas" width="512" height="512"></canvas>
+
+  <script src="../js/tesserace.js"></script>
+  <script src="../js/snippets.js"></script>
+
+  <script type="text/javascript">
+    window.addEventListener( 'load', function() {
+      var gl = tess.gl;
+
+      var vertexBuffer = gl.createBuffer();
+      gl.bindBuffer( gl.ARRAY_BUFFER, vertexBuffer );
+      gl.bufferData( gl.ARRAY_BUFFER, new Float32Array( [
+        -1, -1,
+        -1, +1,
+        +1, -1,
+        +1, +1
+      ] ), gl.STATIC_DRAW );
+
+      var width = 512;
+      var height = 512;
+
+      /*---------------------------------------------------------------------------*
+      * Normal texture
+      *----------------------------------------------------------------------------*/
+
+      var posz = document.getElementById( 'posz' );
+
+      var normalTexture = gl.createTexture();
+      gl.bindTexture( gl.TEXTURE_2D, normalTexture );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR );
+      gl.pixelStorei( gl.UNPACK_FLIP_Y_WEBGL, true );
+      gl.texImage2D( gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, posz );
+      gl.bindTexture( gl.TEXTURE_2D, null );
+
+      document.body.removeChild( posz );
+
+      tess.textureQuadGammaProgram.use();
+
+      gl.uniform1f( tess.textureQuadGammaProgram.uniformLocations.brightness, 1 );
+
+      gl.activeTexture( gl.TEXTURE0 );
+      gl.bindTexture( gl.TEXTURE_2D, normalTexture );
+      gl.bindBuffer( gl.ARRAY_BUFFER, vertexBuffer );
+      gl.vertexAttribPointer( tess.textureQuadGammaProgram.attributeLocations.vertex, 2, gl.FLOAT, false, 0, 0 );
+      gl.drawArrays( gl.TRIANGLE_STRIP, 0, 4 );
+      gl.bindTexture( gl.TEXTURE_2D, null );
+
+      /*---------------------------------------------------------------------------*
+      * Float test
+      *----------------------------------------------------------------------------*/
+
+      var floaty = gl.getExtension( 'OES_texture_float' );
+      var lineary = gl.getExtension( 'OES_texture_float_linear' );
+
+      var data = new Float32Array( width * height * 3 );
+      for ( var row = 0; row < height; row++ ) {
+        for ( var col = 0; col < width; col++ ) {
+          var offset = 3 * (row * width + col);
+          data[offset] = row / ( height - 1 );
+          data[offset + 1] = col / ( width - 1 );
+          data[offset + 2] = 0;
+        }
+      }
+
+      var floatTexture = gl.createTexture();
+      gl.bindTexture( gl.TEXTURE_2D, floatTexture );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR );
+      gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR );
+      gl.pixelStorei( gl.UNPACK_FLIP_Y_WEBGL, true );
+      // gl.texImage2D( gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, posz );
+      gl.texImage2D( gl.TEXTURE_2D, 0, gl.RGB, 512, 512, 0, gl.RGB, gl.FLOAT, data );
+      // gl.texImage2D( gl.TEXTURE_2D, 0, gl.RGB, 512, 512, 0, gl.RGB, gl.HALF_FLOAT_OES, data );
+      gl.bindTexture( gl.TEXTURE_2D, null );
+
+      gl.uniform1f( tess.textureQuadGammaProgram.uniformLocations.brightness, 1 );
+
+      gl.activeTexture( gl.TEXTURE0 );
+      gl.bindTexture( gl.TEXTURE_2D, floatTexture );
+      gl.bindBuffer( gl.ARRAY_BUFFER, vertexBuffer );
+      gl.vertexAttribPointer( tess.textureQuadGammaProgram.attributeLocations.vertex, 2, gl.FLOAT, false, 0, 0 );
+      gl.drawArrays( gl.TRIANGLE_STRIP, 0, 4 );
+      gl.bindTexture( gl.TEXTURE_2D, null );
+    } );
+  </script>
+</body>
+</html>

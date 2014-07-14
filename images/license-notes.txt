@@ -1,0 +1,8 @@
+
+hdrTest* images are downsampled HDRi from http://www.viz-people.com/portfolio/free-hdri-maps/ with the bottoms cut off.
+It notes "free non commerical" version.
+
+colorsf2half.hdr is from hhttp://www.openfootage.net/ (bottom cut off), which notes CC-by attribution.
+
+Oak texture sources are from http://www.viz-people.com/portfolio/free-floor-textures/ (free in general use),
+downsampled and reprocessed as necessary.

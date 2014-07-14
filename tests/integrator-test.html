@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+  <title>Tesserace Integrator Test</title>
+
+  <style type="text/css">
+    canvas {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      margin-top: calc(-512px * 0.5);
+      margin-left: calc(-512px * 0.5);
+    }
+
+    img {
+      position: absolute;
+      visibility: hidden;
+      overflow: hidden;
+    }
+  </style>
+
+  <script src="../lib/lodash-2.4.1.min.js"></script>
+  <script type="text/javascript">
+    var oldArray64 = window.Float64Array;
+    window.Float64Array = window.Float32Array;
+  </script>
+  <script src="../lib/dot.min.js"></script>
+  <script type="text/javascript">
+    window.Float64Array = oldArray64;
+  </script>
+</head>
+<body>
+  <canvas id="canvas" width="512" height="512"></canvas>
+
+  <script src="../js/tesserace.js"></script>
+  <script src="../js/snippets.js"></script>
+
+  <script type="text/javascript">
+    window.addEventListener( 'load', function() {
+      var gl = tess.gl;
+
+      var testSamplingProgramBlueGreenGradient = tess.createIntegratorProgram(
+        'sampleXY',
+        tess.snippets.pseudorandom.toString() + '\n' +
+        'vec4 sampleXY( vec2 p, float seed ) {\n' +
+        '  if ( p.x > 0.8 ) { return pseudorandom(seed) > pow(p.y,1.0/2.2) ? vec4(1.0) : vec4(0.0); }\n' +
+        '  return vec4( 0, pseudorandom(seed) * texCoord.x, pseudorandom(78.233 * seed) * texCoord.y, 1 );\n' +
+        '}\n', 5 );
+
+      var integrator = new tess.TextureIntegrator( testSamplingProgramBlueGreenGradient, function( program ) {
+        // nothing needed
+      }, canvas.width );
+
+      var lastTime = Date.now();
+
+      var samplerSteps = 1;
+      var actualSamplerSteps = 1;
+
+      (function step() {
+        window.requestAnimationFrame( step );
+
+        var currentTime = Date.now();
+        var timeElapsed = currentTime - lastTime;
+        lastTime = currentTime;
+
+        var speed = 1/70;
+
+        if ( timeElapsed > 18 ) {
+          var factor = ( 18 / timeElapsed );
+          samplerSteps = Math.max( 1, samplerSteps * factor );
+        } else {
+          samplerSteps += 0.2;
+        }
+        actualSamplerSteps = 0.8 * actualSamplerSteps + 0.2 * samplerSteps;
+
+        var steps = Math.max( 1, Math.floor( actualSamplerSteps ) );
+        for ( var i = 0; i < steps; i++ ) {
+          integrator.step();
+        }
+        integrator.render();
+      })();
+
+      console && console.log && console.log( testSamplingProgramBlueGreenGradient.fragmentSource );
+    } );
+  </script>
+</body>
+</html>

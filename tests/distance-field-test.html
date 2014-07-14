@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+  <title>Tesserace 3D Test</title>
+
+  <style type="text/css">
+
+  </style>
+
+  <script src="../lib/lodash-2.4.1.min.js"></script>
+  <script type="text/javascript">
+    var oldArray64 = window.Float64Array;
+    window.Float64Array = window.Float32Array;
+  </script>
+  <script src="../lib/dot.min.js"></script>
+  <script type="text/javascript">
+    window.Float64Array = oldArray64;
+  </script>
+</head>
+<body>
+  <canvas id="canvas" width="1024" height="1024"></canvas>
+
+  <script type="text/javascript">
+    var sizeResults = /size=([^&#]+)/.exec( location.search );
+    if ( sizeResults ) {
+      var sizeResult = sizeResults[1];
+      document.getElementById( 'canvas' ).width = sizeResult;
+      document.getElementById( 'canvas' ).height = sizeResult;
+    }
+  </script>
+
+  <script src="../js/tesserace.js"></script>
+  <script src="../js/snippets.js"></script>
+  <script src="../js/traceables3.js"></script>
+  <script src="../js/materials3.js"></script>
+  <script src="../js/scene3.js"></script>
+
+  <script type="text/javascript">
+    function initialize() {
+      var gl = tess.gl;
+
+      var snippets = tess.snippets;
+
+      var samplingProgram;
+
+      var camera = new tess.Camera3(
+        dot( 0, 0, -40 ),
+        new dot.Matrix3(
+          1, 0, 0,
+          0, 1, 0,
+          0, 0, 1 ),
+        function() {
+          integrator && integrator.clear();
+        }
+      );
+
+      // ring of 12 bowls with flat bottoms
+      // var distanceSnippet = new tess.Snippet(
+      //   'float distanceField( vec3 p ) {\n' +
+      //   '  float angle = atan( p.z, p.x );\n' +
+      //   '  float mag = length( vec2( p.x, p.z ) );\n' +
+      //   '  angle = mod( angle, PI / 6.0 ) - PI / 12.0;\n' +
+      //   '  p = vec3( mag * cos( angle ) - 20.0, p.y, mag * sin( angle ) );\n' +
+      //   '  return ' +
+      //     'dIntersection( ' +
+      //       'dUnion( ' +
+      //         'dDifference( ' +
+      //           'dIntersection( ' +
+      //             'sdSphere( p, 5.0 ), ' +
+      //             'sdPlane( p, vec3( 0, 1, 0 ), 0.0 ) ' +
+      //           '), ' +
+      //           'dIntersection( ' +
+      //             'sdSphere( p, 4.6 ), ' +
+      //             'sdPlane( p, vec3( 0, -1, 0 ), -3.6 ) ' +
+      //           ') ' +
+      //         '), ' +
+      //         'sdTorus( p, vec2( 4.8, 0.2 ) ) ' +
+      //       '), ' +
+      //       'sdPlane( p, vec3( 0, -1, 0 ), -4.0 ) ' +
+      //     ')' +
+      //   ';\n' +
+      //   '}\n',
+      //   [snippets.PI, snippets.sdSphere, snippets.sdPlane, snippets.sdTorus, snippets.dIntersection, snippets.dDifference, snippets.dUnion] );
+
+
+      var distanceSnippet = ( function() {
+        // we measured our glass in inches (bleh...)
+        function toCM( x ) { return 2.54 * x; }
+
+        var nSides = 9;
+
+        // approximate
+        var bottomRidgeRadius = toCM( ( 2.5 + 1/8 ) / 2 );
+        var bottomValleyRadius = bottomRidgeRadius - toCM( 1/8 );
+        var bottomInnerRadius = bottomRidgeRadius - toCM( 2/8 );
+        var bottomFlatRadius = bottomRidgeRadius - toCM( 3/8 );
+        var lipRadius = toCM( 1/16 );
+        var topTipRadius = toCM( ( 3 + 3/8 ) / 2 ); // save 1/64 extra for torus on top?
+        var topY = toCM( 5 + 10/32 );
+        var transitionTopY = topY - toCM( 1 + 3/8 );
+        var transitionBottomY = topY - toCM( 2 );
+        var flatBaseTopY = toCM( 7/16 );
+        var flatBaseBottomY = toCM( 1/32 );
+        var coneSlope = ( topTipRadius - bottomRidgeRadius ) / topY;
+        var coneNormal = dot( 1, -coneSlope ).normalized();
+        var ridgeConeBottomY = -bottomRidgeRadius / coneSlope;
+        var valleyConeBottomY = -bottomValleyRadius / coneSlope;
+        var innerConeBottomY = -bottomInnerRadius / coneSlope;
+        var cylinderCutoutRadius = toCM( 1/8 ) / ( 2 * ( 1 - Math.cos( Math.PI / nSides ) ) ); // because of the circumradius/apothem
+        var cylinderEdgeRadius = coneSlope * transitionBottomY + bottomValleyRadius;
+        var cylinderRotationAngle = Math.atan( coneSlope );
+        var co = tess.toFloat( Math.cos( cylinderRotationAngle ) );
+        var si = tess.toFloat( Math.sin( cylinderRotationAngle ) );
+        var sii = tess.toFloat( -Math.sin( cylinderRotationAngle ) );
+        var bottomRoundHeight = toCM( 1/8 );
+        var bottomRoundRadius = coneSlope * bottomRoundHeight + bottomRidgeRadius - bottomRoundHeight;
+        var innerBaseRoundSize = toCM( 1/8 );
+        var innerBaseRoundHeight = flatBaseTopY + innerBaseRoundSize;
+        var innerBaseRoundRadius = coneSlope * innerBaseRoundHeight + bottomInnerRadius - innerBaseRoundSize;
+        var transitionTopRadius = coneSlope * transitionTopY + bottomValleyRadius;
+        var transitionTopCurve = toCM( 1/2 );
+
+        var ridgeConeExpr = 'sdCone( p - vec3( 0.0, ' + tess.toFloat( ridgeConeBottomY ) + ', 0.0 ), ' + tess.toVec2( coneNormal ) + ' )';
+        var valleyConeExpr = 'sdCone( p - vec3( 0.0, ' + tess.toFloat( valleyConeBottomY ) + ', 0.0 ), ' + tess.toVec2( coneNormal ) + ' )';
+        var innerConeExpr = 'sdCone( p - vec3( 0.0, ' + tess.toFloat( innerConeBottomY ) + ', 0.0 ), ' + tess.toVec2( coneNormal ) + ' )';
+
+        var lipTorusExpr = 'sdTorus( p - vec3( 0.0, ' + tess.toFloat( topY ) + ', 0.0 ), vec2( ' + tess.toFloat( topTipRadius - lipRadius ) + ', ' + tess.toFloat( lipRadius ) + ' ) )';
+        var flatBaseBottomTorusExpr = 'sdTorus( p, vec2( ' + tess.toFloat( bottomFlatRadius ) + ', ' + tess.toFloat( flatBaseBottomY ) + ' ) )';
+
+        var flatBaseBottomCylinderExpr = 'sdCylinder( p, vec3( 0.0, 0.0, ' + tess.toFloat( bottomFlatRadius ) + ' ) )';
+
+        var transitionTopPlaneExpr = 'sdPlane( p, vec3( 0, -1, 0 ), ' + tess.toFloat( transitionTopY ) + ' )';
+        var transitionBottomPlaneExpr = 'sdPlane( p, vec3( 0, -1, 0 ), ' + tess.toFloat( transitionBottomY ) + ' )';
+        var transitionBottomPlaneInvExpr = 'sdPlane( p, vec3( 0, 1, 0 ), ' + tess.toFloat( -transitionBottomY ) + ' )';
+        var flatBaseTopPlaneExpr = 'sdPlane( p, vec3( 0, -1, 0 ), ' + tess.toFloat( flatBaseTopY ) + ' )';
+        var flatBaseBottomPlaneExpr = 'sdPlane( p, vec3( 0, 1, 0 ), ' + tess.toFloat( -flatBaseBottomY ) + ' )';
+        var bottomPlaneExpr = 'sdPlane( p, vec3( 0, -1, 0 ), 0.0 )';
+
+        var insideExpr = '' +
+          'dUnion(\n' +
+            'dUnion(\n' +
+              'dIntersection(\n' +
+                valleyConeExpr + ',\n' +
+                transitionTopPlaneExpr +
+              '),\n' +
+              'sdTorus( p - vec3( 0.0, ' + tess.toFloat( transitionTopY ) + ', 0.0 ), vec2( ' + tess.toFloat( transitionTopRadius - transitionTopCurve ) + ', ' + tess.toFloat( transitionTopCurve ) + ' ) ) ' +
+            '),\n' +
+            'dIntersection(\n' +
+              'dUnion(\n' +
+                'dIntersection(\n' +
+                  innerConeExpr + ',\n' +
+                  'sdPlane( p, vec3( 0, -1, 0 ), ' + tess.toFloat( innerBaseRoundHeight ) + ' )' +
+                '),\n' +
+                'dUnion(\n' +
+                  'sdTorus( p - vec3( 0.0, ' + tess.toFloat( innerBaseRoundHeight ) + ', 0.0 ), vec2( ' + tess.toFloat( innerBaseRoundRadius ) + ', ' + tess.toFloat( innerBaseRoundSize ) + ' ) ), ' +
+                  'sdCylinder( p, vec3( 0.0, 0.0, ' + tess.toFloat( innerBaseRoundRadius ) + ' ) )' +
+                ')\n' +
+              '),\n' +
+              flatBaseTopPlaneExpr +
+            ')\n' +
+          ')';
+
+        var outsideExpr = '' +
+          'dIntersection(\n' +
+            'dUnion(\n' +
+              'dIntersection(\n' +
+                ridgeConeExpr + ',\n' +
+                'dIntersection(\n' +
+                  'sdPlane( p, vec3( 0, -1, 0 ), ' + tess.toFloat( bottomRoundHeight ) + ' ),\n' +
+                  'sdPlane( p, vec3( 0, 1, 0 ), ' + tess.toFloat( -topY ) + ' ) ' +
+                ')\n' +
+              '),\n' +
+              'dUnion(\n' +
+                'sdTorus( p - vec3( 0.0, ' + tess.toFloat( bottomRoundHeight ) + ', 0.0 ), vec2( ' + tess.toFloat( bottomRoundRadius ) + ', ' + tess.toFloat( bottomRoundHeight ) + ' ) ), ' +
+                'sdCylinder( p, vec3( 0.0, 0.0, ' + tess.toFloat( bottomRoundRadius ) + ' ) )' +
+              ')' +
+            '),\n' +
+            bottomPlaneExpr +
+          ')';
+
+        var baseCutoutExpr = '' +
+          'dUnion(\n' +
+            flatBaseBottomTorusExpr + ',\n' +
+            'dIntersection(\n' +
+              flatBaseBottomCylinderExpr + ',\n' +
+              flatBaseBottomPlaneExpr +
+            ') ' +
+          ')';
+
+        var cutCylinderExpr = '' +
+          'dUnion(\n' +
+            'dIntersection(\n' +
+              // 'sdSphere( pMod, 20.0 ), ' +
+              'sdCylinder( pMod, vec3( 0.0, 0.0, ' + tess.toFloat( cylinderCutoutRadius ) + ') ), ' +
+              'sdPlane( pMod, vec3( 0, 1, 0 ), 0.0 )' +
+            '),\n' +
+            'sdSphere( pMod, ' + tess.toFloat( cylinderCutoutRadius ) + ' ) ' +
+          ')';
+
+        return new tess.Snippet(
+          'float distanceField( vec3 p ) {\n' +
+          '  float angle = atan( p.z, p.x );\n' +
+          '  float mag = length( vec2( p.x, p.z ) );\n' +
+          '  angle = mod( angle, 2.0 * PI / ' + tess.toFloat( nSides ) + ' ) - PI / ' + tess.toFloat( nSides ) + ';\n' +
+          '  vec3 pMod = vec3( mag * cos( angle ), p.y, mag * sin( angle ) );\n' +
+          '  pMod = pMod - vec3( -0.10 + ' + tess.toFloat( cylinderEdgeRadius ) + ', ' + tess.toFloat( transitionBottomY ) + ', 0.0 );\n' +
+          '  pMod.xy = mat2( ' + co + ', ' + si + ', ' + sii + ', ' + co + ' ) * pMod.xy;\n' +
+          '  pMod = pMod - vec3( ' + tess.toFloat( cylinderCutoutRadius ) + ', 0.0, 0.0 );\n' +
+          '  return ' +
+            'dDifference(\n' +
+              'dDifference(\n' +
+                'dUnion(\n' +
+                  'dDifference(\n' +
+                    outsideExpr + ',\n' +
+                    insideExpr +
+                  '),\n' +
+                  lipTorusExpr +
+                '),\n' +
+                baseCutoutExpr +
+              '),\n' +
+              cutCylinderExpr +
+            ')' +
+          ';\n' +
+          '}\n',
+          [snippets.PI, snippets.sdSphere, snippets.sdPlane, snippets.sdCylinder, snippets.sdTorus, snippets.sdCone, snippets.dIntersection, snippets.dDifference, snippets.dUnion] );
+      } )();
+
+      window.console && console.log && console.log( distanceSnippet.toString().replace( /  /g, ' ' ).replace( /\n/g, '' ) );
+
+      var fieldMarcher = tess.createDistanceFieldMarcher( 'fieldMarcher', 'distanceField', 65, 1.0, 0.1, [distanceSnippet] );
+      var normalFunc = tess.createDistanceFieldNormal( 'normalFunc', 'distanceField', 0.001, 0.0001, [distanceSnippet] );
+
+      var fragmentSnippet;
+      var fragmentUniforms;
+
+      // true for occlusion-normal shading, false for slice
+      if ( false ) {
+        // occlusion-normal shading
+        fragmentSnippet = new tess.Snippet(
+          'uniform mat3 rotationMatrix;\n' +
+          'uniform vec3 cameraPosition;\n' +
+          'const float infty = 60000.0;\n' +
+          'vec4 sampleXY( vec2 p, float seed ) {\n' +
+          '  vec3 rayPos = cameraPosition;\n' +
+          '  vec2 pJittered = ( p + ( vec2( pseudorandom(seed * 34.16 + 2.6), pseudorandom(seed * 117.13 + 0.26) ) - 0.5 ) / size ) - 0.5;\n' +
+          '  vec3 rayDir = rotationMatrix * normalize( vec3( pJittered, 1.0 ) );\n' +
+          '  float t = fieldMarcher( rayPos, rayDir );\n' +
+          '  if ( t >= 0.0001 ) {\n' +
+          '    vec3 hitPos = rayT( rayPos, rayDir, t );\n' +
+          '    vec3 normal = normalFunc( rayPos, rayDir, hitPos );\n' +
+          // ambient occlusion (true)
+          '    vec3 rayDir = sampleTowardsNormal3( normal, sampleDotWeightOnHemiphere( pseudorandom(seed*164.32+2.5), pseudorandom(7.233 * seed + 1.3) ) );\n' +
+          '    rayPos = hitPos + ' + tess.epsilon + ' * rayDir;\n' +
+          '    bool hits = fieldMarcher( rayPos, rayDir ) >= 0.0001;\n' +
+          '    vec3 occlusion = hits ? vec3( 0.0 ) : vec3( rayDir.y > 0.0 ? 1.0 : 0.1 );\n' +
+          '    return vec4( pow( occlusion * ( normal * 0.5 + 0.5 ), vec3( 0.5 ) ), 1.0);\n' +
+          // normal shading
+          // '    return vec4( normal * 0.5 + 0.5, 1 );\n' +
+          '  } else {\n' +
+          '    return vec4( vec3( rayDir.y > 0.0 ? 0.5 : 0.2 ), 1.0 );\n' +
+          '  }\n' +
+          '}\n',
+          [
+            snippets.pseudorandom, snippets.rayT, snippets.sampleTowardsNormal3,
+            snippets.sampleDotWeightOnHemiphere, fieldMarcher, normalFunc
+          ] );
+        fragmentUniforms = ['rotationMatrix', 'cameraPosition'];
+      } else {
+        // 2D slice with values
+        fragmentSnippet = new tess.Snippet(
+          'uniform mat3 rotationMatrix;\n' +
+          'uniform vec3 cameraPosition;\n' +
+          'const float infty = 60000.0;\n' +
+          'vec4 sampleXY( vec2 p, float seed ) {\n' +
+          '  vec3 rayPos = cameraPosition;\n' +
+          '  vec2 pJittered = ( p + ( vec2( pseudorandom(seed * 34.16 + 2.6), pseudorandom(seed * 117.13 + 0.26) ) - 0.5 ) / size ) - 0.5;\n' +
+          '  vec3 pos = vec3( pJittered.xy + vec2( 0.0, 0.35 ), 0.0 ) * 20.0;\n' + // z=0 plane
+          '  float t = distanceField( pos );\n' +
+          '  t = t * 1.5;\n' + // better scaling to see what we're doing now
+          '  float green = pow( abs( t ), 0.2 ) * 2.0;\n' +
+          '  return ( t > 0.0 ? vec4( t, green, 0.0, 1.0 ) : vec4( 0.0, green, -t, 1.0 ) ) / 10.0;\n' +
+          '}\n',
+          [
+            distanceSnippet, snippets.pseudorandom
+          ] );
+        fragmentUniforms = ['rotationMatrix', 'cameraPosition'];
+      }
+
+
+      var samplingProgram = tess.createIntegratorProgram( 'sampleXY', fragmentSnippet.toString(), 5, fragmentUniforms );
+
+      var integrator = new tess.TextureIntegrator( samplingProgram, function( program ) {
+        // update uniforms
+        gl.uniformMatrix3fv( program.uniformLocations.rotationMatrix, false, camera.rotationMatrix.entries );
+        gl.uniform3f( program.uniformLocations.cameraPosition, camera.position.x, camera.position.y, camera.position.z );
+      }, canvas.width );
+
+      camera.initializeKeyboardControl();
+
+      var lastTime = Date.now();
+
+      var samplerSteps = 1;
+      var actualSamplerSteps = 1;
+
+      (function step() {
+        window.requestAnimationFrame( step );
+
+        var currentTime = Date.now();
+        var timeElapsed = currentTime - lastTime;
+        lastTime = currentTime;
+
+        camera.step( timeElapsed );
+
+        if ( timeElapsed > 18 ) {
+          var factor = ( 18 / timeElapsed );
+          samplerSteps = Math.max( 1, samplerSteps * factor );
+        } else {
+          samplerSteps += 0.2;
+        }
+        actualSamplerSteps = 0.8 * actualSamplerSteps + 0.2 * samplerSteps;
+
+        var steps = Math.max( 1, Math.floor( actualSamplerSteps ) );
+        for ( var i = 0; i < steps; i++ ) {
+          integrator.step();
+        }
+        integrator.render();
+      })();
+    }
+    window.addEventListener( 'load', function() {
+      initialize();
+    } );
+  </script>
+</body>
+</html>
