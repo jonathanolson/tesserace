@@ -24,7 +24,7 @@
       width: 600px;
     }
 
-    #brightnessSlider, #dofSpreadSlider, #focalLengthSlider, #environmentRotationSlider, #customGLSLText {
+    #brightnessSlider, #dofSpreadSlider, #focalLengthSlider, #environmentRotationSlider, #customGLSLText, #environmentSunStrengthSlider {
       width: 450px;
     }
 
@@ -258,6 +258,9 @@
         <br>
         <label for="environmentRotation">Rotation</label>
         <input autocomplete="off" id="environmentRotationSlider" name="environmentRotation" type="range" min="0" max="360" value="297" step="0.5" />
+        <br>
+        <label for="environmentSunStrength">Extra Sun</label>
+        <input autocomplete="off" id="environmentSunStrengthSlider" name="environmentSunStrength" type="range" min="0" max="100" value="0" step="0.5" />
       </p>
       <p>
         <div class="h">Size</div>
@@ -318,16 +321,16 @@
 
   <script type="text/javascript">
     var vizpeopleEnvironments = {
-      '01': { brightness: 3 },
-      '02': { brightness: 3 },
-      '03': { brightness: 3 },
-      '04': { brightness: 3 },
-      '05': { brightness: 3 },
-      '06': { brightness: 20 },
-      '07': { brightness: 3 },
-      '08': { brightness: 3 },
-      '09': { brightness: 3 },
-      '10': { brightness: 3 }
+      '01': { brightness: 3, sunCutoff: 11 },
+      '02': { brightness: 5, sunCutoff: 5 },
+      '03': { brightness: 2, sunCutoff: 75 },
+      '04': { brightness: 3, sunCutoff: 13 },
+      '05': { brightness: 3, sunCutoff: 9 },
+      '06': { brightness: 20, sunCutoff: 0.2 },
+      '07': { brightness: 10, sunCutoff: 1.5 },
+      '08': { brightness: 3, sunCutoff: 11 },
+      '09': { brightness: 3, sunCutoff: 11 },
+      '10': { brightness: 3, sunCutoff: 11 }
     };
 
     function setStatus( message ) {
@@ -577,12 +580,13 @@
       sceneObs = coffeeSceneObs;
 
       var environmentRotation = document.getElementById( 'environmentRotationSlider' ).value / 360;
+      var environmentSunStrength = 0;
 
       var compiledOk = false;
       var needsCompilation = true;
       var needsTexture = false;
 
-      var environment = new tess.TextureEnvironment( envTexture, 'rectilinear', 3, environmentRotation, true );
+      var environment = new tess.TextureEnvironment( envTexture, 'rectilinear', vizpeopleEnvironments['04'].brightness, vizpeopleEnvironments['04'].sunCutoff, environmentRotation, environmentSunStrength, true );
       var projection = new tess.PerspectiveDepthRays( 150, 0 );
 
       var samplingProgram;
@@ -851,7 +855,7 @@
       var updateCustomGLSLButton = document.getElementById( 'updateCustomGLSLButton' );
       updateCustomGLSLButton.addEventListener( 'click', updateGLSL );
 
-      function lazyLoadEnvironmentTexture( url, width, height, type, multiplier, isHalf ) {
+      function lazyLoadEnvironmentTexture( url, width, height, type, multiplier, sunCutoff, isHalf ) {
         if ( needsTexture ) {
           return; // bleh, better way to just use the latest?
         }
@@ -864,7 +868,7 @@
           needsTexture = false;
           setStatus();
 
-          environment = new tess.TextureEnvironment( window.envTexture, type, multiplier, environmentRotation, isHalf );
+          environment = new tess.TextureEnvironment( window.envTexture, type, multiplier, sunCutoff, environmentRotation, environmentSunStrength, isHalf );
           updateSampleProgram();
         } );
       }
@@ -872,20 +876,26 @@
       // vizpeople skies
       _.each( ['01','02','03','04','05','06','07','08','09','10'], function( id ) {
         document.getElementById( 'envTest' + id ).addEventListener( 'click', function() {
-          lazyLoadEnvironmentTexture( '../images/hdrTest' + id + '_2half.hdr', 2048, 512, 'rectilinear', vizpeopleEnvironments[id].brightness, true );
+          lazyLoadEnvironmentTexture( '../images/hdrTest' + id + '_2half.hdr', 2048, 512, 'rectilinear', vizpeopleEnvironments[id].brightness, vizpeopleEnvironments[id].sunCutoff, true );
         } );
         document.getElementById( 'envTest' + id + 'x' ).addEventListener( 'click', function() {
-          lazyLoadEnvironmentTexture( '../images/hdrTest' + id + '_1half.hdr', 4096, 1024, 'rectilinear', vizpeopleEnvironments[id].brightness, true );
+          lazyLoadEnvironmentTexture( '../images/hdrTest' + id + '_1half.hdr', 4096, 1024, 'rectilinear', vizpeopleEnvironments[id].brightness, vizpeopleEnvironments[id].sunCutoff, true );
         } );
       } );
 
       document.getElementById( 'envDusk2048Box' ).addEventListener( 'click', function() {
-        lazyLoadEnvironmentTexture( '../images/colorsf2half.hdr', 2048, 512, 'rectilinear', 3, true );
+        lazyLoadEnvironmentTexture( '../images/colorsf2half.hdr', 2048, 512, 'rectilinear', 3, 50, true );
       } );
 
       var environmentRotationSlider = document.getElementById( 'environmentRotationSlider' );
       environmentRotationSlider.addEventListener( 'input', function() {
         environment.rotation = environmentRotation = environmentRotationSlider.value / 360;
+        integrator.clear();
+      } );
+
+      var environmentSunStrengthSlider = document.getElementById( 'environmentSunStrengthSlider' );
+      environmentSunStrengthSlider.addEventListener( 'input', function() {
+        environment.sunStrength = environmentSunStrength = environmentSunStrengthSlider.value / 50;
         integrator.clear();
       } );
 

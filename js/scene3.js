@@ -105,14 +105,20 @@
     }
   };
 
-  tess.TextureEnvironment = function TextureEnvironment( envTexture, type, multiplier, initialRotation, isHalf ) {
+  tess.TextureEnvironment = function TextureEnvironment( envTexture, type, multiplier, sunCutoff, initialRotation, initialSunStrength, isHalf ) {
     this.envTexture = envTexture;
     this.type = type;
     this.multiplier = multiplier;
+    this.sunCutoff = sunCutoff;
     this.rotation = initialRotation;
+    this.sunStrength = initialSunStrength;
     this.isHalf = isHalf;
 
-    this.uniforms = ['envTexture','envRotation'];
+    if ( this.sunCutoff < 1 ) {
+        debugger;
+      }
+
+    this.uniforms = ['envTexture','envRotation','sunStrength'];
   };
   tess.TextureEnvironment.prototype = {
     constructor: tess.TextureEnvironment,
@@ -128,11 +134,13 @@
       program.gl.uniform1i( program.uniformLocations.envTexture, 1 );
 
       program.gl.uniform1f( program.uniformLocations.envRotation, this.rotation );
+      program.gl.uniform1f( program.uniformLocations.sunStrength, this.sunStrength );
     },
 
     getPreamble: function() {
       return 'uniform sampler2D envTexture;\n' +
-             'uniform float envRotation;\n';
+             'uniform float envRotation;\n' +
+             'uniform float sunStrength;\n';
     },
 
     getEnvironmentExpression: function() {
@@ -145,7 +153,10 @@
         // TODO: rotation?
         textureLookup = 'textureCube( envTexture, rayDir ).rgb';
       }
-      return '      accumulation = accumulation + attenuation * ' + textureLookup + ' * ' + tess.toFloat( this.multiplier ) + ';\n';
+
+      var sunFactor = 'pow( max( 1.0, length( textureLookup ) / sqrt( 3.0 ) - ' + tess.toFloat( this.sunCutoff ) + '), sunStrength )';
+      return '      vec3 textureLookup = ' + textureLookup + ';\n' +
+             '      accumulation = accumulation + attenuation * textureLookup * ' + sunFactor + ' * ' + tess.toFloat( this.multiplier ) + ';\n';
     }
   };
 
